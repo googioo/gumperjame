@@ -217,7 +217,7 @@ fn spawn_platforms(
             Collider::cuboid(100.0, 10.0),
         ));
 
-    // top center
+    // top center platform
     commands
         .spawn((
             MaterialMesh2dBundle {
