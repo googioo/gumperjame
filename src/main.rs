@@ -34,36 +34,48 @@ fn main() {
         })
         .init_resource::<JumpTimer>()
         .init_resource::<DashTimer>()
-        .init_state::<LeftRight>()
-        .add_systems(Startup, (spawn_platforms, spawn_player, spawn_camera))
+        .init_state::<Direction>()
+        .init_state::<GravitySwitch>()
+        .init_state::<SimulationState>()
+        .init_state::<AppState>()
+        .add_systems(Startup, (
+            spawn_camera,
+            spawn_platforms.before(spawn_player),
+            spawn_spikes.after(spawn_platforms),
+            spawn_player,
+        ))
         .add_systems(Update, (
-            movement_wasd_and_jump,
-            player_dash,
-            // camera_follow.after(movement_wasd_and_jump),
+            camera_follow.before(player_gravity),
+            player_gravity.after(player_movement),
+            player_movement,
             check_grounded,
+            reset_player_to_spawn,
             exit_game,
         ))
         .run()
 }
 
 // -- COMPONENTS --
+
 #[derive(Component)]
 pub struct Player {}
 
 #[derive(Component)]
 pub struct Jumps {
     pub has_grounded_jump: bool,
+    pub is_jumping: bool,
 }
 
 #[derive(Resource, Default)]
 pub struct JumpTimer {
-    pub hold_jump: Stopwatch,
+    pub jump_expire: Stopwatch,
     pub coyote_time: Stopwatch,
 }
 
 #[derive(Component)]
 pub struct Dash {
     pub has_dash: bool,
+    pub is_dashing: bool,
 }
 
 #[derive(Resource, Default)]
@@ -72,39 +84,115 @@ pub struct DashTimer {
 }
 
 #[derive(States, Debug, Clone, Copy, Eq, PartialEq, Hash, Default)]
-pub enum LeftRight {
+pub enum Direction {
     #[default]
     Right,
     Left,
 }
 
+#[derive(States, Debug, Clone, Copy, Eq, PartialEq, Hash, Default)]
+pub enum GravitySwitch {
+    #[default]
+    On,
+    Off,
+}
+
+#[derive(States, Debug, Clone, Copy, Eq, PartialEq, Hash, Default)]
+pub enum AppState {
+    #[default]
+    MainMenu,
+    Game,
+    GameOver,
+}
+
+#[derive(States, Debug, Clone, Copy, Eq, PartialEq, Hash, Default)]
+pub enum SimulationState {
+    #[default]
+    Paused,
+    Running,
+}
+
+// -- EVENTS --
+
+#[derive(Event)]
+pub struct GameOver {
+    pub score: u32,
+}
+
+// This PlatformBundle uses drawn shapes rather than sprites
+// should be more flexible once it works
 // #[derive(Bundle, Clone)]
 // pub struct PlatformBundle<M: Material2d> {
 //     mesh_bundle: MaterialMesh2dBundle<M>,
-//     transform: TransformBundle,
 //     body: RigidBody,
 //     collider: Collider,
 // }
 
-// impl PlatformBundle<M> {
-//     fn new(x_coord: f32, y_coord: f32, half_width: f32, half_height: f32) -> Self {
+// impl<M: Material2d> PlatformBundle<M> {
+//     fn new(
+//         width: f32,
+//         height: f32,
+//         x_coord: f32,
+//         y_coord: f32,
+//         mut meshes: ResMut<Assets<Mesh>>,
+//         mut materials: ResMut<Assets<ColorMaterial>>
+//     ) -> Self {
 //         Self {
-//             sprite: Sprite {
-//                 color: PLATFORM_COLOR,
+//             mesh_bundle: MaterialMesh2dBundle {
+//                 mesh: Mesh2dHandle(meshes.add(Rectangle::new(width, height))),
+//                 material: M::,
 //                 ..default()
 //             },
-//             transform: TransformBundle::from(Transform::from_xyz(x_coord, y_coord, 0.0)),
+//             // sprite_bundle: SpriteBundle {
+//             //     sprite: Sprite {
+//             //         color: PLATFORM_COLOR,
+//             //         custom_size: Some(Vec2::new(width, height)),
+//             //         ..default()
+//             //     },
+//             //     transform: Transform::from_xyz(x_coord, y_coord, 0.0),
+//             //     ..default()
+//             // },
 //             body: RigidBody::Fixed,
-//             collider: Collider::cuboid(250.0, 10.0),
+//             collider: Collider::cuboid(width / 2.0, height / 2.0),
 //         }
 //     }
 // }
 
+// Currently used PlatformBundle. Creates Rectangles using sprites
+// is stiff and can only make rectangles
+#[derive(Bundle)]
+pub struct PlatformBundle {
+    sprite_bundle: SpriteBundle,
+    body: RigidBody,
+    collider: Collider,
+}
+
+impl PlatformBundle {
+    fn new(width: f32, height: f32, x_coord: f32, y_coord: f32) -> Self {
+        Self {
+            sprite_bundle: SpriteBundle {
+                sprite: Sprite {
+                    color: PLATFORM_COLOR,
+                    custom_size: Some(Vec2::new(width, height)),
+                    ..default()
+                },
+                transform: Transform::from_xyz(x_coord, y_coord, 0.0),
+                ..default()
+            },
+            body: RigidBody::Fixed,
+            collider: Collider::cuboid(width / 2.0, height / 2.0),
+        }
+    }
+}
+
 const HALF_PLAYER: f32 = 25.0;
 // const PLAYER_SPEED: f32 = 10.0;
 // const JUMP_IMPULSE: f32 = 10.0;
-const TIME_TO_JUMP_HEIGHT: f32 = 0.4;
-const TIME_TO_DASH_EXPIRE: f32 = 0.5;
+const TIME_TO_JUMP_EXPIRE: f32 = 0.4;
+const TIME_TO_DASH_EXPIRE: f32 = 0.3;
+const PLAYER_COLOR: Color = Color::GREEN;
+const PLATFORM_COLOR: Color = Color::GRAY;
+const SPIKE_COLOR: Color = Color::WHITE;
 
 // -- SETUP --
 fn spawn_camera(mut commands: Commands, window_query: Query<&Window, With<PrimaryWindow>>) {
@@ -132,12 +220,12 @@ fn spawn_player(
                 mesh: Mesh2dHandle(
                     meshes.add(Rectangle::new(HALF_PLAYER * 2.0, HALF_PLAYER * 2.0))
                 ),
-                material: materials.add(Color::ALICE_BLUE),
+                material: materials.add(PLAYER_COLOR),
                 ..default()
             },
             Player {},
-            Jumps { has_grounded_jump: true },
-            Dash { has_dash: true },
+            Jumps { has_grounded_jump: false, is_jumping: false },
+            Dash { has_dash: false, is_dashing: false },
             RigidBody::Dynamic,
         ))
         .insert((
@@ -158,7 +246,65 @@ fn spawn_player(
         ));
 }
 
-fn spawn_platforms(
+fn spawn_platforms(mut commands: Commands, window_query: Query<&Window, With<PrimaryWindow>>) {
+    let window: &Window = window_query.get_single().unwrap();
+
+    // // spawn platform
+    // commands.spawn(
+    //     PlatformBundle::new(400.0, 40.0, window.width() / 2.0, window.height() / 2.0 - 120.0)
+    // );
+
+    // // left platform
+    // commands.spawn(
+    //     PlatformBundle::new(200.0, 20.0, window.width() / 2.0 - 300.0, window.height() / 2.0)
+    // );
+
+    // // right platform
+    // commands.spawn(
+    //     PlatformBundle::new(200.0, 20.0, window.width() / 2.0 + 300.0, window.height() / 2.0)
+    // );
+
+    // // top center platform
+    // commands.spawn(
+    //     PlatformBundle::new(200.0, 20.0, window.width() / 2.0, window.height() / 2.0 + 100.0)
+    // );
+
+    let half_width = window.width() / 2.0;
+    let half_height = window.height() / 2.0;
+
+    // spawn platform
+    commands.spawn(PlatformBundle::new(400.0, 40.0, half_width, half_height - 120.0));
+
+    // left platform
+    commands.spawn(PlatformBundle::new(200.0, 20.0, half_width - 300.0, half_height));
+
+    // right platform
+    commands.spawn(PlatformBundle::new(200.0, 20.0, half_width + 300.0, half_height));
+
+    // top center platform
+    commands.spawn(PlatformBundle::new(200.0, 20.0, half_width, half_height + 100.0));
+
+    commands.spawn(PlatformBundle::new(500.0, 40.0, half_width + 800.0, half_height - 120.0));
+
+    // old platform spawner
+    // commands
+    //     .spawn((
+    //         MaterialMesh2dBundle {
+    //             mesh: Mesh2dHandle(meshes.add(Rectangle::new(400.0, 50.0))),
+    //             material: materials.add(PLATFORM_COLOR),
+    //             ..default()
+    //         },
+    //         RigidBody::Fixed,
+    //     ))
+    //     .insert((
+    //         TransformBundle::from(
+    //             Transform::from_xyz(window.width() / 2.0, window.height() / 2.0 - 125.0, 0.0)
+    //         ),
+    //         Collider::cuboid(200.0, 25.0),
+    //     ));
+}
+
+fn spawn_spikes(
     mut commands: Commands,
     window_query: Query<&Window, With<PrimaryWindow>>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -166,72 +312,30 @@ fn spawn_platforms(
 ) {
     let window: &Window = window_query.get_single().unwrap();
 
-    // bottom center platform
+    // top center spike
     commands
         .spawn((
             MaterialMesh2dBundle {
-                mesh: Mesh2dHandle(meshes.add(Rectangle::new(400.0, 50.0))),
-                material: materials.add(Color::WHITE),
+                mesh: Mesh2dHandle(
+                    meshes.add(
+                        Triangle2d::new(
+                            Vec2::new(0.0, 0.0),
+                            Vec2::new(50.0, 0.0),
+                            Vec2::new(25.0, 75.0)
+                        )
+                    )
+                ),
+                material: materials.add(SPIKE_COLOR),
                 ..default()
             },
             RigidBody::Fixed,
         ))
         .insert((
             TransformBundle::from(
-                Transform::from_xyz(window.width() / 2.0, window.height() / 2.0 - 125.0, 0.0)
+                Transform::from_xyz(window.width() / 2.0 - 25.0, window.height() / 2.0 + 110.0, 0.0)
             ),
-            Collider::cuboid(200.0, 25.0),
-        ));
-
-    // left platform
-    commands
-        .spawn((
-            MaterialMesh2dBundle {
-                mesh: Mesh2dHandle(meshes.add(Rectangle::new(200.0, 20.0))),
-                material: materials.add(Color::WHITE),
-                ..default()
-            },
-            RigidBody::Fixed,
-        ))
-        .insert((
-            TransformBundle::from(
-                Transform::from_xyz(window.width() / 2.0 - 300.0, window.height() / 2.0, 0.0)
-            ),
-            Collider::cuboid(100.0, 10.0),
-        ));
-
-    // right platform
-    commands
-        .spawn((
-            MaterialMesh2dBundle {
-                mesh: Mesh2dHandle(meshes.add(Rectangle::new(200.0, 20.0))),
-                material: materials.add(Color::WHITE),
-                ..default()
-            },
-            RigidBody::Fixed,
-        ))
-        .insert((
-            TransformBundle::from(
-                Transform::from_xyz(window.width() / 2.0 + 300.0, window.height() / 2.0, 0.0)
-            ),
-            Collider::cuboid(100.0, 10.0),
-        ));
-
-    // top center platform
-    commands
-        .spawn((
-            MaterialMesh2dBundle {
-                mesh: Mesh2dHandle(meshes.add(Rectangle::new(200.0, 20.0))),
-                material: materials.add(Color::WHITE),
-                ..default()
-            },
-            RigidBody::Fixed,
-        ))
-        .insert((
-            TransformBundle::from(
-                Transform::from_xyz(window.width() / 2.0, window.height() / 2.0 + 100.0, 0.0)
-            ),
-            Collider::cuboid(100.0, 10.0),
+            Collider::triangle(Vec2::new(0.0, 0.0), Vec2::new(50.0, 0.0), Vec2::new(25.0, 75.0)),
+            Sensor,
         ));
 }
 
@@ -249,71 +353,108 @@ fn camera_follow(
     }
 }
 
-fn movement_wasd_and_jump(
-    mut keyboard_input: ResMut<ButtonInput<KeyCode>>,
+fn player_gravity(
+    mut controllers: Query<&mut KinematicCharacterController>,
+    current_gravity_switch: Res<State<GravitySwitch>>
+) {
+    let player_gravity = 15.0;
+    if current_gravity_switch.get() == &GravitySwitch::On {
+        if let Ok(mut controller) = controllers.get_single_mut() {
+            // gravity;
+            controller.translation = match controller.translation {
+                Some(mut v) => {
+                    v.y = -player_gravity;
+                    Some(v)
+                }
+                None => Some(Vec2::new(0.0, -player_gravity)),
+            };
+        }
+    }
+}
+
+fn reset_player_to_spawn(mut player_query: Query<&mut Transform, With<Player>>) {
+    if let Ok(mut player_position) = player_query.get_single_mut() {
+        if player_position.translation.y <= 0.0 {
+            player_position.translation = Vec3::new(WINDOW_WIDTH / 2.0, WINDOW_HEIGHT / 2.0, 0.0);
+        }
+    }
+}
+
+fn player_movement(
+    keyboard_input: ResMut<ButtonInput<KeyCode>>,
     mut controllers: Query<(&mut KinematicCharacterController, &mut Jumps, &mut Dash)>,
     time: Res<Time>,
     mut jump_timer: ResMut<JumpTimer>,
-    mut next_left_right: ResMut<NextState<LeftRight>>
+    mut dash_timer: ResMut<DashTimer>,
+    mut next_direction: ResMut<NextState<Direction>>,
+    current_direction: Res<State<Direction>>,
+    mut next_gravity_switch: ResMut<NextState<GravitySwitch>>
 ) {
     if let Ok((mut controller, mut jumps, mut dash)) = controllers.get_single_mut() {
         let player_speed = 8.0;
-        let player_gravity = 15.0;
-        let jump_speed = 10.0;
+        let jump_speed = 15.0;
+        let dash_speed = 20.0;
 
-        // gravity
-        controller.translation = match controller.translation {
-            Some(mut v) => {
-                v.y = -player_gravity;
-                Some(v)
-            }
-            None => Some(Vec2::new(0.0, -player_gravity)),
-        };
+        next_gravity_switch.set(GravitySwitch::On);
 
+        //horizontal
         // right
-        if keyboard_input.pressed(KeyCode::ArrowRight) || keyboard_input.pressed(KeyCode::KeyD) {
+        if
+            (keyboard_input.pressed(KeyCode::ArrowRight) ||
+                keyboard_input.pressed(KeyCode::KeyD)) &&
+            dash.is_dashing == false
+        {
             controller.translation = match controller.translation {
                 Some(mut v) => {
-                    next_left_right.set(LeftRight::Right);
+                    next_direction.set(Direction::Right);
                     v.x = player_speed;
                     Some(v)
                 }
                 None => {
-                    next_left_right.set(LeftRight::Right);
+                    next_direction.set(Direction::Right);
                     Some(Vec2::new(player_speed, 0.0))
                 }
             };
         } else if
             // left
-            keyboard_input.pressed(KeyCode::ArrowLeft) ||
-            keyboard_input.pressed(KeyCode::KeyA)
+            (keyboard_input.pressed(KeyCode::ArrowLeft) || keyboard_input.pressed(KeyCode::KeyA)) &&
+            dash.is_dashing == false
         {
             controller.translation = match controller.translation {
                 Some(mut v) => {
-                    next_left_right.set(LeftRight::Left);
+                    next_direction.set(Direction::Left);
                     v.x = -player_speed;
                     Some(v)
                 }
                 None => {
-                    next_left_right.set(LeftRight::Left);
+                    next_direction.set(Direction::Left);
                     Some(Vec2::new(-player_speed, 0.0))
                 }
             };
         }
 
+        // vertical
         // up
-        if keyboard_input.pressed(KeyCode::ArrowUp) || keyboard_input.pressed(KeyCode::KeyW) {
+        if
+            (keyboard_input.pressed(KeyCode::ArrowUp) || keyboard_input.pressed(KeyCode::KeyW)) &&
+            dash.is_dashing == false
+        {
             controller.translation = match controller.translation {
                 Some(mut v) => {
+                    next_gravity_switch.set(GravitySwitch::Off);
                     v.y = player_speed;
                     Some(v)
                 }
-                None => Some(Vec2::new(0.0, player_speed)),
+                None => {
+                    next_gravity_switch.set(GravitySwitch::Off);
+                    Some(Vec2::new(0.0, player_speed))
+                }
             };
         } else if
             // down
-            keyboard_input.pressed(KeyCode::ArrowDown) ||
-            keyboard_input.pressed(KeyCode::KeyS)
+            (keyboard_input.pressed(KeyCode::ArrowDown) || keyboard_input.pressed(KeyCode::KeyS)) &&
+            dash.is_dashing == false &&
+            jumps.is_jumping
         {
             controller.translation = match controller.translation {
                 Some(mut v) => {
@@ -325,8 +466,19 @@ fn movement_wasd_and_jump(
         }
 
         // jump
-        if jumps.has_grounded_jump == true && keyboard_input.pressed(KeyCode::Space) {
-            jump_timer.hold_jump.tick(time.delta());
+        // if player isn't jumping but can and pressed jump then jump
+        if
+            jumps.has_grounded_jump == true &&
+            keyboard_input.pressed(KeyCode::Space) &&
+            dash.is_dashing == false
+        {
+            jumps.is_jumping = true;
+            // also turn off gravity during jump
+            next_gravity_switch.set(GravitySwitch::Off);
+        }
+
+        // if player holds jump and has jump time then keep jumping
+        if jumps.is_jumping == true && jump_timer.jump_expire.elapsed_secs() < TIME_TO_JUMP_EXPIRE {
             controller.translation = match controller.translation {
                 Some(mut v) => {
                     v.y = jump_speed;
@@ -334,22 +486,96 @@ fn movement_wasd_and_jump(
                 }
                 None => Some(Vec2::new(0.0, jump_speed)),
             };
+            jump_timer.jump_expire.tick(time.delta());
         }
 
-        // if jump_timer expires or player lets go of space then end the jump, resetting values and reacitvating gravity
+        // if player stops jumping or jump time expires then stop jumping
         if
-            jump_timer.hold_jump.elapsed_secs() >= TIME_TO_JUMP_HEIGHT ||
+            jump_timer.jump_expire.elapsed_secs() >= TIME_TO_JUMP_EXPIRE ||
             keyboard_input.just_released(KeyCode::Space)
         {
+            jumps.is_jumping = false;
             jumps.has_grounded_jump = false;
-            keyboard_input.release(KeyCode::Space);
-            jump_timer.hold_jump.reset();
-            // // cuts off vertical velocity once jump expires
+            jump_timer.jump_expire.reset();
         }
+
+        // if jumps.has_grounded_jump == true && keyboard_input.pressed(KeyCode::Space) {
+        //     jumps.is_jumping = true;
+        //     controller.translation = match controller.translation {
+        //         Some(mut v) => {
+        //             next_gravity_switch.set(GravitySwitch::Off);
+        //             v.y = jump_speed;
+        //             Some(v)
+        //         }
+        //         None => {
+        //             next_gravity_switch.set(GravitySwitch::Off);
+        //             Some(Vec2::new(0.0, jump_speed))
+        //         }
+        //     };
+        //     jump_timer.jump_expire.tick(time.delta());
+        // }
+
+        // // if jump_timer expires or player lets go of space then end the jump, resetting values and reacitvating gravity
+        // if
+        //     jump_timer.jump_expire.elapsed_secs() >= TIME_TO_JUMP_EXPIRE ||
+        //     keyboard_input.just_released(KeyCode::Space)
+        // {
+        //     jumps.has_grounded_jump = false;
+        //     jumps.is_jumping = false;
+        //     keyboard_input.release(KeyCode::Space);
+        //     jump_timer.jump_expire.reset();
+        //     // // cuts off vertical velocity once jump expires
+        // }
         // println!("{}", jumps.has_grounded_jump)
 
         // player dash
-        // if player has dash and presses dash key then dash
+        // if player isn't currently dashing or jumping, has dash and presses dash key, then dash
+        if
+            dash.is_dashing == false &&
+            dash.has_dash == true &&
+            (keyboard_input.just_pressed(KeyCode::ShiftLeft) ||
+                keyboard_input.just_pressed(KeyCode::ShiftRight)) &&
+            jumps.is_jumping == false
+        {
+            dash.is_dashing = true;
+        }
+
+        if dash.is_dashing == true && dash_timer.dash_expire.elapsed_secs() < TIME_TO_DASH_EXPIRE {
+            if current_direction.get() == &Direction::Left {
+                controller.translation = match controller.translation {
+                    Some(mut v) => {
+                        next_gravity_switch.set(GravitySwitch::Off);
+                        v.x = -dash_speed;
+                        Some(v)
+                    }
+                    None => {
+                        next_gravity_switch.set(GravitySwitch::Off);
+                        Some(Vec2::new(-dash_speed, 0.0))
+                    }
+                };
+            }
+
+            if current_direction.get() == &Direction::Right {
+                controller.translation = match controller.translation {
+                    Some(mut v) => {
+                        next_gravity_switch.set(GravitySwitch::Off);
+                        v.x = dash_speed;
+                        Some(v)
+                    }
+                    None => {
+                        next_gravity_switch.set(GravitySwitch::Off);
+                        Some(Vec2::new(dash_speed, 0.0))
+                    }
+                };
+            }
+            dash_timer.dash_expire.tick(time.delta());
+        }
+
+        if dash_timer.dash_expire.elapsed_secs() >= TIME_TO_DASH_EXPIRE {
+            dash.is_dashing = false;
+            dash.has_dash = false;
+            dash_timer.dash_expire.reset()
+        }
 
         // if dash.has_dash == true {
         //     if
@@ -364,57 +590,56 @@ fn movement_wasd_and_jump(
         //     None => Some(Vec2::new(player_dash_speed, 0.0)),
         // };
     }
+
+    // if
+    //     dash.has_dash == true &&
+    //     (keyboard_input.just_pressed(KeyCode::ShiftLeft) ||
+    //         keyboard_input.just_pressed(KeyCode::ShiftRight))
+    // {
+    //     while dash_timer.dash_expire.elapsed_secs() < TIME_TO_DASH_EXPIRE {
+    //         if current_left_right.get() == &LeftRight::Left {
+    //             controller.translation = Some(Vec2::new(-player_dash_speed, 0.0));
+    //         }
+    //         if current_left_right.get() == &LeftRight::Right {
+    //             controller.translation = Some(Vec2::new(player_dash_speed, 0.0));
+    //         }
+    //         dash_timer.dash_expire.tick(time.delta());
+    //     }
+    //     // }
+
+    //     // if dash timer expires then no more dash
+    //     if dash_timer.dash_expire.elapsed_secs() >= TIME_TO_DASH_EXPIRE {
+    //         dash.has_dash = false;
+    //     }
+    // }
 }
-// if
-//     dash.has_dash == true &&
-//     (keyboard_input.just_pressed(KeyCode::ShiftLeft) ||
-//         keyboard_input.just_pressed(KeyCode::ShiftRight))
-// {
-//     while dash_timer.dash_expire.elapsed_secs() < TIME_TO_DASH_EXPIRE {
-//         if current_left_right.get() == &LeftRight::Left {
-//             controller.translation = Some(Vec2::new(-player_dash_speed, 0.0));
+
+// fn player_dash(
+//     mut controllers: Query<(&mut KinematicCharacterController, &mut Dash)>,
+//     mut dash_timer: ResMut<DashTimer>,
+//     current_direction: Res<State<Direction>>,
+//     keyboard_input: Res<ButtonInput<KeyCode>>
+// ) {
+//     let dash_speed = 100.0;
+
+//     for (mut controller, mut dash) in controllers.iter_mut() {
+//         if dash_timer.dash_expire.elapsed_secs() < TIME_TO_DASH_EXPIRE {
+//             if keyboard_input.just_pressed(KeyCode::ShiftLeft) {
+//                 controller.translation = Some(Vec2::new(dash_speed, 0.0));
+//             }
 //         }
-//         if current_left_right.get() == &LeftRight::Right {
-//             controller.translation = Some(Vec2::new(player_dash_speed, 0.0));
-//         }
-//         dash_timer.dash_expire.tick(time.delta());
 //     }
 // }
-
-// if dash timer expires then no more dash
-// if dash_timer.dash_expire.elapsed_secs() >= TIME_TO_DASH_EXPIRE {
-//     dash.has_dash = false;
-//         }
-//     }
-// }
-
-fn player_dash(
-    mut controllers: Query<(&mut KinematicCharacterController, &mut Dash)>,
-    mut dash_timer: ResMut<DashTimer>,
-    current_left_right: Res<State<LeftRight>>,
-    keyboard_input: Res<ButtonInput<KeyCode>>
-) {
-    let dash_speed = 100.0;
-    for (mut controller, mut dash) in controllers.iter_mut() {
-        if dash_timer.dash_expire.elapsed_secs() < TIME_TO_DASH_EXPIRE {
-            if keyboard_input.just_pressed(KeyCode::ShiftLeft) {
-                controller.translation = Some(Vec2::new(dash_speed, 0.0));
-            }
-        }
-    }
-}
 
 fn check_grounded(
     mut player_query: Query<
         (&KinematicCharacterControllerOutput, &mut Jumps, &mut Dash),
         With<Player>
-    >,
-    mut dash_timer: ResMut<DashTimer>
+    >
 ) {
     for (output, mut jumps, mut dash) in player_query.iter_mut() {
         if output.grounded == true {
             // reset jumps when grounded
-            dash_timer.dash_expire.reset();
             jumps.has_grounded_jump = true;
             dash.has_dash = true;
             // println!("GROUNDED");
@@ -423,6 +648,62 @@ fn check_grounded(
         }
     }
 }
+
+// -- GAME STATES--
+
+// fn pause_simulation(mut next_simulation_state: ResMut<NextState<SimulationState>>) {
+//     next_simulation_state.set(SimulationState::Paused)
+// }
+
+// fn resume_simulation(mut next_simulation_state: ResMut<NextState<SimulationState>>) {
+//     next_simulation_state.set(SimulationState::Running)
+// }
+
+// fn toggle_simulation(
+//     keyboard_input: Res<ButtonInput<KeyCode>>,
+//     current_simulation_state: Res<State<SimulationState>>,
+//     mut next_simulation_state: ResMut<NextState<SimulationState>>
+// ) {
+//     if keyboard_input.just_pressed(KeyCode::KeyP) {
+//         match current_simulation_state.get() {
+//             SimulationState::Paused => { next_simulation_state.set(SimulationState::Running) }
+//             SimulationState::Running => { next_simulation_state.set(SimulationState::Paused) }
+//         }
+//     }
+// }
+
+// fn transition_to_game_state(
+//     keyboard_input: Res<ButtonInput<KeyCode>>,
+//     current_app_state: Res<State<AppState>>,
+//     mut next_app_state: ResMut<NextState<AppState>>
+// ) {
+//     if keyboard_input.just_pressed(KeyCode::KeyG) {
+//         if current_app_state.get() != &AppState::Game {
+//             next_app_state.set(AppState::Game)
+//         }
+//     }
+// }
+
+// fn transition_to_main_menu_state(
+//     keyboard_input: Res<ButtonInput<KeyCode>>,
+//     current_app_state: Res<State<AppState>>,
+//     mut next_app_state: ResMut<NextState<AppState>>
+// ) {
+//     if keyboard_input.just_pressed(KeyCode::KeyM) {
+//         if current_app_state.get() != &AppState::MainMenu {
+//             next_app_state.set(AppState::MainMenu)
+//         }
+//     }
+// }
+
+// fn handle_game_over(
+//     mut game_over_event_reader: EventReader<GameOver>,
+//     mut next_app_state: ResMut<NextState<AppState>>
+// ) {
+//     for event in game_over_event_reader.read() {
+//         next_app_state.set(AppState::GameOver);
+//     }
+// }
 
 // -- EXIT GAME --
 fn exit_game(
