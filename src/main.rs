@@ -360,6 +360,7 @@ fn player_movement(
                 keyboard_input.pressed(KeyCode::Space)
             {
                 jumps.is_jumping = true;
+                translation.y = JUMP_SPEED;
                 // also turn off gravity during jump
                 next_gravity_switch.set(GravitySwitch::Off);
             }
@@ -387,7 +388,7 @@ fn player_movement(
 
         // if player holds jump and has jump time then keep jumping
         if jumps.is_jumping && jump_timer.jump_expire.elapsed_secs() < TIME_TO_JUMP_EXPIRE {
-            translation.y = JUMP_SPEED;
+            // translation.y = JUMP_SPEED;
             jump_timer.jump_expire.tick(time.delta());
         }
 
