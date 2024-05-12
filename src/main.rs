@@ -360,6 +360,7 @@ fn player_movement(
                 keyboard_input.pressed(KeyCode::Space)
             {
                 jumps.is_jumping = true;
+                // Set velocity y to jump speed
                 translation.y = JUMP_SPEED;
                 // also turn off gravity during jump
                 next_gravity_switch.set(GravitySwitch::Off);
@@ -371,7 +372,7 @@ fn player_movement(
                 dash.has_dash &&
                 (keyboard_input.just_pressed(KeyCode::ShiftLeft) ||
                     keyboard_input.just_pressed(KeyCode::ShiftRight)) &&
-                jumps.is_jumping == false
+                !jumps.is_jumping
             {
                 dash.is_dashing = true;
             }
