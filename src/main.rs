@@ -4,7 +4,7 @@ use bevy::math::*;
 use bevy::prelude::*;
 use bevy::sprite::*;
 use bevy::time::*;
-use bevy::window::{PrimaryWindow, WindowResolution};
+use bevy::window::{ PrimaryWindow, WindowResolution };
 use bevy_rapier2d::prelude::*;
 
 const WINDOW_WIDTH: f32 = 1024.0;
@@ -24,15 +24,17 @@ const DASH_SPEED: f32 = 20.0;
 fn main() {
     App::new()
         // window plugin settings
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "Rust/Bevy Capstone Platformer".to_string(),
-                resolution: WindowResolution::new(WINDOW_WIDTH, WINDOW_HEIGHT),
-                resizable: false,
+        .add_plugins(
+            DefaultPlugins.set(WindowPlugin {
+                primary_window: Some(Window {
+                    title: "Rust/Bevy Capstone Platformer".to_string(),
+                    resolution: WindowResolution::new(WINDOW_WIDTH, WINDOW_HEIGHT),
+                    resizable: false,
+                    ..default()
+                }),
                 ..default()
-            }),
-            ..default()
-        }))
+            })
+        )
         // add rapier physics plugin
         .add_plugins(RapierPhysicsPlugin::<()>::default())
         // add rendering to everything, showing 'hitboxes'
@@ -47,26 +49,20 @@ fn main() {
         .init_state::<GravitySwitch>()
         .init_state::<SimulationState>()
         .init_state::<AppState>()
-        .add_systems(
-            Startup,
-            (
-                spawn_camera,
-                spawn_platforms.before(spawn_player),
-                spawn_spikes.after(spawn_platforms),
-                spawn_player.after(spawn_camera),
-            ),
-        )
-        .add_systems(
-            Update,
-            (
-                player_movement,
-                camera_follow.after(player_gravity),
-                player_gravity.after(player_movement),
-                check_grounded.after(player_gravity),
-                reset_player_to_spawn.after(check_grounded),
-                exit_game,
-            ),
-        )
+        .add_systems(Startup, (
+            spawn_camera,
+            spawn_platforms.before(spawn_player),
+            spawn_spikes.after(spawn_platforms),
+            spawn_player.after(spawn_camera),
+        ))
+        .add_systems(Update, (
+            player_movement,
+            camera_follow.after(player_gravity),
+            player_gravity.after(player_movement),
+            check_grounded.after(player_gravity),
+            reset_player_to_spawn.after(check_grounded),
+            exit_game,
+        ))
         .run()
 }
 
@@ -183,7 +179,7 @@ fn spawn_player(
     mut commands: Commands,
     window_query: Query<&Window, With<PrimaryWindow>>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
+    mut materials: ResMut<Assets<ColorMaterial>>
 ) {
     let window: &Window = window_query.get_single().unwrap();
 
@@ -193,7 +189,7 @@ fn spawn_player(
             MaterialMesh2dBundle {
                 // mesh: shapes[0].clone(),
                 mesh: Mesh2dHandle(
-                    meshes.add(Rectangle::new(HALF_PLAYER * 2.0, HALF_PLAYER * 2.0)),
+                    meshes.add(Rectangle::new(HALF_PLAYER * 2.0, HALF_PLAYER * 2.0))
                 ),
                 material: materials.add(PLAYER_COLOR),
                 ..default()
@@ -210,11 +206,9 @@ fn spawn_player(
             RigidBody::Dynamic,
         ))
         .insert((
-            TransformBundle::from(Transform::from_xyz(
-                window.width() / 2.0,
-                window.height() / 2.0,
-                0.0,
-            )),
+            TransformBundle::from(
+                Transform::from_xyz(window.width() / 2.0, window.height() / 2.0, 0.0)
+            ),
             Collider::cuboid(HALF_PLAYER, HALF_PLAYER),
             LockedAxes::ROTATION_LOCKED,
             GravityScale(0.0),
@@ -236,50 +230,25 @@ fn spawn_platforms(mut commands: Commands, window_query: Query<&Window, With<Pri
     let half_height = window.height() / 2.0;
 
     // spawn platform
-    commands.spawn(PlatformBundle::new(
-        400.0,
-        40.0,
-        half_width,
-        half_height - 120.0,
-    ));
+    commands.spawn(PlatformBundle::new(400.0, 40.0, half_width, half_height - 120.0));
 
     // left platform
-    commands.spawn(PlatformBundle::new(
-        200.0,
-        20.0,
-        half_width - 300.0,
-        half_height,
-    ));
+    commands.spawn(PlatformBundle::new(200.0, 20.0, half_width - 300.0, half_height));
 
     // right platform
-    commands.spawn(PlatformBundle::new(
-        200.0,
-        20.0,
-        half_width + 300.0,
-        half_height,
-    ));
+    commands.spawn(PlatformBundle::new(200.0, 20.0, half_width + 300.0, half_height));
 
     // top center platform
-    commands.spawn(PlatformBundle::new(
-        200.0,
-        20.0,
-        half_width,
-        half_height + 100.0,
-    ));
+    commands.spawn(PlatformBundle::new(200.0, 20.0, half_width, half_height + 100.0));
 
-    commands.spawn(PlatformBundle::new(
-        500.0,
-        40.0,
-        half_width + 800.0,
-        half_height - 120.0,
-    ));
+    commands.spawn(PlatformBundle::new(500.0, 40.0, half_width + 800.0, half_height - 120.0));
 }
 
 fn spawn_spikes(
     mut commands: Commands,
     window_query: Query<&Window, With<PrimaryWindow>>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
+    mut materials: ResMut<Assets<ColorMaterial>>
 ) {
     let window: &Window = window_query.get_single().unwrap();
 
@@ -287,34 +256,32 @@ fn spawn_spikes(
     commands
         .spawn((
             MaterialMesh2dBundle {
-                mesh: Mesh2dHandle(meshes.add(Triangle2d::new(
-                    Vec2::new(0.0, 0.0),
-                    Vec2::new(50.0, 0.0),
-                    Vec2::new(25.0, 75.0),
-                ))),
+                mesh: Mesh2dHandle(
+                    meshes.add(
+                        Triangle2d::new(
+                            Vec2::new(0.0, 0.0),
+                            Vec2::new(50.0, 0.0),
+                            Vec2::new(25.0, 75.0)
+                        )
+                    )
+                ),
                 material: materials.add(SPIKE_COLOR),
                 ..default()
             },
             RigidBody::Fixed,
         ))
         .insert((
-            TransformBundle::from(Transform::from_xyz(
-                window.width() / 2.0 - 25.0,
-                window.height() / 2.0 + 110.0,
-                0.0,
-            )),
-            Collider::triangle(
-                Vec2::new(0.0, 0.0),
-                Vec2::new(50.0, 0.0),
-                Vec2::new(25.0, 75.0),
+            TransformBundle::from(
+                Transform::from_xyz(window.width() / 2.0 - 25.0, window.height() / 2.0 + 110.0, 0.0)
             ),
+            Collider::triangle(Vec2::new(0.0, 0.0), Vec2::new(50.0, 0.0), Vec2::new(25.0, 75.0)),
             Sensor,
         ));
 }
 
 fn camera_follow(
     player_query: Query<&Transform, With<Player>>,
-    mut camera_query: Query<&mut Transform, (With<Camera>, Without<Player>)>,
+    mut camera_query: Query<&mut Transform, (With<Camera>, Without<Player>)>
 ) {
     if let Ok(player_transform) = player_query.get_single() {
         let pos = player_transform.translation;
@@ -328,7 +295,7 @@ fn camera_follow(
 
 fn player_gravity(
     mut controllers: Query<&mut KinematicCharacterController>,
-    current_gravity_switch: Res<State<GravitySwitch>>,
+    current_gravity_switch: Res<State<GravitySwitch>>
 ) {
     if current_gravity_switch.get() == &GravitySwitch::On {
         if let Ok(mut controller) = controllers.get_single_mut() {
@@ -356,7 +323,7 @@ fn player_movement(
     mut dash_timer: ResMut<DashTimer>,
     mut next_direction: ResMut<NextState<Direction>>,
     current_direction: Res<State<Direction>>,
-    mut next_gravity_switch: ResMut<NextState<GravitySwitch>>,
+    mut next_gravity_switch: ResMut<NextState<GravitySwitch>>
 ) {
     if let Ok((mut controller, mut jumps, mut dash)) = controllers.get_single_mut() {
         next_gravity_switch.set(GravitySwitch::On);
@@ -368,13 +335,13 @@ fn player_movement(
 
         if !dash.is_dashing {
             //horizontal
-            if keyboard_input.pressed(KeyCode::ArrowRight) || keyboard_input.pressed(KeyCode::KeyD)
-            {
+            if keyboard_input.pressed(KeyCode::ArrowRight) || keyboard_input.pressed(KeyCode::KeyD) {
                 //right
                 translation.x = PLAYER_SPEED;
                 next_direction.set(Direction::Right);
-            } else if keyboard_input.pressed(KeyCode::ArrowLeft)
-                || keyboard_input.pressed(KeyCode::KeyA)
+            } else if
+                keyboard_input.pressed(KeyCode::ArrowLeft) ||
+                keyboard_input.pressed(KeyCode::KeyA)
             {
                 // left
                 translation.x = -PLAYER_SPEED;
@@ -384,12 +351,13 @@ fn player_movement(
             // vertical
             if keyboard_input.pressed(KeyCode::ArrowUp) || keyboard_input.pressed(KeyCode::KeyW) {
                 // up
+                next_gravity_switch.set(GravitySwitch::Off);
                 translation.y = PLAYER_SPEED;
             } else if
-            // down
-            (keyboard_input.pressed(KeyCode::ArrowDown)
-                || keyboard_input.pressed(KeyCode::KeyS))
-                && jumps.is_jumping
+                // down
+                (keyboard_input.pressed(KeyCode::ArrowDown) ||
+                    keyboard_input.pressed(KeyCode::KeyS)) &&
+                jumps.is_jumping
             {
                 translation.y = -PLAYER_SPEED;
             }
@@ -406,10 +374,11 @@ fn player_movement(
 
             // player dash
             // if player isn't currently dashing or jumping, has dash and presses dash key, then dash
-            if dash.has_dash
-                && (keyboard_input.just_pressed(KeyCode::ShiftLeft)
-                    || keyboard_input.just_pressed(KeyCode::ShiftRight))
-                && !jumps.is_jumping
+            if
+                dash.has_dash &&
+                (keyboard_input.just_pressed(KeyCode::ShiftLeft) ||
+                    keyboard_input.just_pressed(KeyCode::ShiftRight)) &&
+                !jumps.is_jumping
             {
                 dash.is_dashing = true;
             }
@@ -431,8 +400,9 @@ fn player_movement(
         }
 
         // if player stops jumping or jump time expires then stop jumping
-        if jump_timer.jump_expire.elapsed_secs() >= TIME_TO_JUMP_EXPIRE
-            || keyboard_input.just_released(KeyCode::Space)
+        if
+            jump_timer.jump_expire.elapsed_secs() >= TIME_TO_JUMP_EXPIRE ||
+            keyboard_input.just_released(KeyCode::Space)
         {
             jumps.is_jumping = false;
             jumps.has_grounded_jump = false;
@@ -442,19 +412,19 @@ fn player_movement(
         if dash_timer.dash_expire.elapsed_secs() >= TIME_TO_DASH_EXPIRE {
             dash.is_dashing = false;
             dash.has_dash = false;
-            dash_timer.dash_expire.reset()
+            dash_timer.dash_expire.reset();
         }
 
         // Apply changes
-        controller.translation = Some(translation)
+        controller.translation = Some(translation);
     }
 }
 
 fn check_grounded(
     mut player_query: Query<
         (&KinematicCharacterControllerOutput, &mut Jumps, &mut Dash),
-        With<Player>,
-    >,
+        With<Player>
+    >
 ) {
     for (player, mut jumps, mut dash) in player_query.iter_mut() {
         if player.grounded {
@@ -525,10 +495,11 @@ fn check_grounded(
 // -- EXIT GAME --
 fn exit_game(
     keyboard_input: Res<ButtonInput<KeyCode>>,
-    mut app_exit_event_writer: EventWriter<AppExit>,
+    mut app_exit_event_writer: EventWriter<AppExit>
 ) {
-    if keyboard_input.just_pressed(KeyCode::Backspace)
-        || keyboard_input.just_pressed(KeyCode::Escape)
+    if
+        keyboard_input.just_pressed(KeyCode::Backspace) ||
+        keyboard_input.just_pressed(KeyCode::Escape)
     {
         app_exit_event_writer.send(AppExit);
     }
