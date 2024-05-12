@@ -324,10 +324,7 @@ fn player_movement(
 
         let mut translation: Vec2 = match controller.translation {
             Some(vec) => {vec}
-            None => {
-                next_direction.set(Direction::Right);
-                Vec2::new(0.0, 0.0)
-            },
+            None => {Vec2::new(0.0, 0.0)},
         };
         
         if !dash.is_dashing {
