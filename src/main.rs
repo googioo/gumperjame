@@ -322,14 +322,6 @@ fn player_movement(
     if let Ok((mut controller, mut jumps, mut dash)) = controllers.get_single_mut() {
         next_gravity_switch.set(GravitySwitch::On);
 
-        match controller.translation {
-            Some(_) => {}
-            None => {
-                controller.translation = Some(Vec2::new(0.0, 0.0));
-                next_direction.set(Direction::Right);
-            },
-        }
-
         let mut translation: Vec2 = match controller.translation {
             Some(vec) => {vec}
             None => {
